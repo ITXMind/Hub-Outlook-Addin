@@ -257,15 +257,55 @@
     let emailData      = null;
     let searchTimeout  = null;
 
-    // Chave para guardar tokens no sessionStorage
-    const SESSION_KEY = 'hub_addin_session';
+    // Chaves fixas para guardar tokens — persistem entre sessões via RoamingSettings
+    const TOKEN_KEY   = 'hub_addin_access_token';
+    const REFRESH_KEY = 'hub_addin_refresh_token';
+
+    function saveTokens(accessToken, refreshToken) {
+      try {
+        // Tentar RoamingSettings (persiste no servidor Microsoft — mais fiável)
+        if (Office.context.roamingSettings) {
+          Office.context.roamingSettings.set(TOKEN_KEY, accessToken);
+          Office.context.roamingSettings.set(REFRESH_KEY, refreshToken);
+          Office.context.roamingSettings.saveAsync();
+        }
+      } catch(e) {}
+      try { localStorage.setItem(TOKEN_KEY, accessToken); } catch(e) {}
+      try { localStorage.setItem(REFRESH_KEY, refreshToken); } catch(e) {}
+    }
+
+    function loadTokens() {
+      let access = null, refresh = null;
+      try {
+        if (Office.context.roamingSettings) {
+          access  = Office.context.roamingSettings.get(TOKEN_KEY);
+          refresh = Office.context.roamingSettings.get(REFRESH_KEY);
+        }
+      } catch(e) {}
+      if (!access) {
+        try { access  = localStorage.getItem(TOKEN_KEY); } catch(e) {}
+        try { refresh = localStorage.getItem(REFRESH_KEY); } catch(e) {}
+      }
+      return { access, refresh };
+    }
+
+    function clearTokens() {
+      try {
+        if (Office.context.roamingSettings) {
+          Office.context.roamingSettings.remove(TOKEN_KEY);
+          Office.context.roamingSettings.remove(REFRESH_KEY);
+          Office.context.roamingSettings.saveAsync();
+        }
+      } catch(e) {}
+      try { localStorage.removeItem(TOKEN_KEY); } catch(e) {}
+      try { localStorage.removeItem(REFRESH_KEY); } catch(e) {}
+    }
 
     // ── Office init ──────────────────────────────────────────────────────────
     Office.onReady(async () => {
       supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
           storage: {
-            // localStorage persiste mesmo após fechar o Outlook
             getItem:    k => { try { return localStorage.getItem(k); } catch(e) { return null; } },
             setItem:    (k, v) => { try { localStorage.setItem(k, v); } catch(e) {} },
             removeItem: k => { try { localStorage.removeItem(k); } catch(e) {} },
@@ -275,12 +315,26 @@
         }
       });
 
-      // Verificar se já há sessão guardada
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      if (session) {
-        currentSession = session;
-        currentUser    = session.user;
-        await initAttachView();
+      // Tentar restaurar sessão a partir dos tokens guardados
+      const { access, refresh } = loadTokens();
+      if (access && refresh) {
+        try {
+          const { data, error } = await supabaseClient.auth.setSession({
+            access_token: access,
+            refresh_token: refresh,
+          });
+          if (!error && data.session) {
+            currentSession = data.session;
+            currentUser    = data.user;
+            // Actualizar tokens guardados (podem ter sido renovados)
+            saveTokens(data.session.access_token, data.session.refresh_token);
+            await initAttachView();
+          } else {
+            clearTokens();
+          }
+        } catch(e) {
+          clearTokens();
+        }
       }
 
       document.addEventListener('click', e => {
@@ -344,6 +398,7 @@
               }
               currentSession = data.session;
               currentUser    = data.user;
+              saveTokens(data.session.access_token, data.session.refresh_token);
               await initAttachView();
             } else {
               showAlert('loginError', 'Login cancelado. Tenta novamente.');
@@ -363,6 +418,8 @@
     }
 
     async function handleSignOut() {
+      clearTokens();
+      try { await supabaseClient.auth.signOut(); } catch(e) {}
       currentUser = currentSession = selectedDeal = emailData = null;
       document.getElementById('userBadge').style.display = 'none';
       showSection('sectionLogin');
