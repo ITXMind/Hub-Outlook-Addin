@@ -250,7 +250,6 @@
     const EDGE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/attach-email-to-deal`;
     const HUB_LOGIN_URL     = 'https://itxmind.github.io/Hub-Outlook-Addin/taskpane/auth-dialog.html';
 
-    const _mem = {};
     let supabaseClient = null;
     let currentUser    = null;
     let currentSession = null;
@@ -258,19 +257,31 @@
     let emailData      = null;
     let searchTimeout  = null;
 
+    // Chave para guardar tokens no sessionStorage
+    const SESSION_KEY = 'hub_addin_session';
+
     // ── Office init ──────────────────────────────────────────────────────────
-    Office.onReady(() => {
+    Office.onReady(async () => {
       supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
           storage: {
-            getItem:    k => _mem[k] || null,
-            setItem:    (k, v) => { _mem[k] = v; },
-            removeItem: k => { delete _mem[k]; },
+            // localStorage persiste mesmo após fechar o Outlook
+            getItem:    k => { try { return localStorage.getItem(k); } catch(e) { return null; } },
+            setItem:    (k, v) => { try { localStorage.setItem(k, v); } catch(e) {} },
+            removeItem: k => { try { localStorage.removeItem(k); } catch(e) {} },
           },
-          persistSession: false,
-          autoRefreshToken: false,
+          persistSession: true,
+          autoRefreshToken: true,
         }
       });
+
+      // Verificar se já há sessão guardada
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (session) {
+        currentSession = session;
+        currentUser    = session.user;
+        await initAttachView();
+      }
 
       document.addEventListener('click', e => {
         if (!e.target.closest('#searchWrapper')) {
@@ -570,3 +581,4 @@
   </script>
 </body>
 </html>
+
