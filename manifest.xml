@@ -14,13 +14,13 @@
   <Description DefaultValue="Anexe emails do Outlook diretamente a oportunidades no ITXMind Hub"/>
 
   <!-- Ícones públicos do Office CDN (sempre acessíveis, não requerem setup) -->
-  <IconUrl DefaultValue="https://afonsocanato.github.io/HostingTaskpane/taskpane/assets/icon-16.png"/>
-  <HighResolutionIconUrl DefaultValue="https://afonsocanato.github.io/HostingTaskpane/taskpane/assets/icon-80.png"/>
+  <IconUrl DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/assets/icon-16.png"/>
+  <HighResolutionIconUrl DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/assets/icon-80.png"/>
   <SupportUrl DefaultValue="https://itxmind.pt"/>
 
   <AppDomains>
     <!-- Sem barra no final -->
-    <AppDomain>https://afonsocanato.github.io</AppDomain>
+    <AppDomain>https://itxmind.github.io</AppDomain>
     <AppDomain>https://hub.itxmind.com</AppDomain>
     <AppDomain>https://oguddaopsphkvjnqrkmg.supabase.co</AppDomain>
   </AppDomains>
@@ -38,7 +38,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://afonsocanato.github.io/HostingTaskpane/taskpane/index.html?v=2"/>
+        <SourceLocation DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/index.html?v=2"/>
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -95,14 +95,14 @@
     <Resources>
       <bt:Images>
         <!-- Ícones públicos do Office CDN, sempre acessíveis -->
-        <bt:Image id="Icon.16x16" DefaultValue="https://afonsocanato.github.io/HostingTaskpane/taskpane/assets/icon-16.png"/>
-        <bt:Image id="Icon.32x32" DefaultValue="https://afonsocanato.github.io/HostingTaskpane/taskpane/assets/icon-32.png"/>
-        <bt:Image id="Icon.80x80" DefaultValue="https://afonsocanato.github.io/HostingTaskpane/taskpane/assets/icon-80.png"/>
+        <bt:Image id="Icon.16x16" DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/assets/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/assets/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/assets/icon-80.png"/>
       </bt:Images>
 
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://afonsocanato.github.io/HostingTaskpane/taskpane/commands.html?v=2"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://afonsocanato.github.io/HostingTaskpane/taskpane/index.html?v=2"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/commands.html?v=2"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/index.html?v=2"/>
       </bt:Urls>
 
       <bt:ShortStrings>
