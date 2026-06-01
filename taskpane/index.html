@@ -240,6 +240,70 @@
     <button class="btn btn-primary" id="btnAttach" onclick="handleAttach()" disabled>
       Anexar Email
     </button>
+    <button class="btn" id="btnGoCreate" onclick="goToCreate()"
+      style="margin-top:8px;background:var(--bg-card);color:var(--text);border:1px solid var(--border);">
+      + Criar Oportunidade a partir deste email
+    </button>
+  </div>
+
+  <!-- ── CREATE DEAL ── -->
+  <div class="section" id="sectionCreate">
+    <div class="alert alert-error"   id="createError"></div>
+    <div class="alert alert-success" id="createSuccess"></div>
+
+    <div class="email-preview">
+      <div class="subject" id="createPreviewSubject">A carregar email...</div>
+      <div class="meta"    id="createPreviewMeta"></div>
+    </div>
+
+    <div class="field">
+      <label>Título da Oportunidade</label>
+      <input type="text" id="createTitle" placeholder="Nome da oportunidade..." />
+    </div>
+
+    <div class="field">
+      <label>Cliente</label>
+      <div class="search-wrapper" id="createClientWrapper">
+        <input type="text" id="createClientSearch"
+          placeholder="Pesquisar cliente..."
+          oninput="onCreateClientInput()"
+          onfocus="onCreateClientFocus()"
+          autocomplete="off" />
+        <div class="search-results" id="createClientResults"></div>
+      </div>
+      <div class="selected-deal" id="createClientBox" style="margin-top:6px;">
+        <div class="deal-title" id="createClientName"></div>
+        <span class="change-link" onclick="clearCreateClient()">Alterar</span>
+      </div>
+    </div>
+
+    <div class="field" id="createContactField" style="display:none;">
+      <label>Contacto</label>
+      <div class="search-wrapper" id="createContactWrapper">
+        <input type="text" id="createContactSearch"
+          placeholder="Pesquisar contacto..."
+          oninput="onCreateContactInput()"
+          autocomplete="off" />
+        <div class="search-results" id="createContactResults"></div>
+      </div>
+      <div class="selected-deal" id="createContactBox" style="margin-top:6px;">
+        <div class="deal-title" id="createContactName"></div>
+        <span class="change-link" onclick="clearCreateContact()">Alterar</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Valor Estimado (€)</label>
+      <input type="text" id="createValue" placeholder="0" inputmode="decimal" />
+    </div>
+
+    <button class="btn btn-primary" id="btnCreate" onclick="handleCreate()" disabled>
+      Criar Oportunidade
+    </button>
+
+    <div style="margin-top:10px;text-align:center;">
+      <span class="change-link" onclick="showSection('sectionAttach')">← Voltar a anexar email</span>
+    </div>
   </div>
 
   <footer>ITXMind Hub · Outlook Add-in</footer>
@@ -341,7 +405,14 @@
         if (!e.target.closest('#searchWrapper')) {
           document.getElementById('searchResults').classList.remove('show');
         }
+        if (!e.target.closest('#createClientWrapper') && !e.target.closest('#createClientBox')) {
+          document.getElementById('createClientResults').classList.remove('show');
+        }
+        if (!e.target.closest('#createContactWrapper') && !e.target.closest('#createContactBox')) {
+          document.getElementById('createContactResults').classList.remove('show');
+        }
       });
+      document.getElementById('createTitle')?.addEventListener('input', updateCreateBtn);
     });
 
     // ── UI helpers ───────────────────────────────────────────────────────────
@@ -442,6 +513,7 @@
             subject: '(email de teste)', sender_name: 'Teste',
             sender_email: 'teste@exemplo.pt', received_at: new Date().toISOString(),
             body_text: 'Teste.', internet_message_id: 'test-' + Date.now(), recipients: [],
+            attachments: [],
           };
           renderEmailPreview();
           return resolve();
@@ -454,13 +526,24 @@
         const messageId   = item.internetMessageId || null;
         const receivedAt  = item.dateTimeCreated ? item.dateTimeCreated.toISOString() : new Date().toISOString();
 
+        // Recolher metadados dos anexos do email (ficheiros)
+        const rawAttachments = item.attachments || [];
+        const attachments = rawAttachments
+          .filter(a => a.isInline !== true) // ignorar só os explicitamente inline
+          .map(a => ({
+            id:          a.id,
+            name:        a.name,
+            size:        a.size,
+            contentType: a.contentType,
+          }));
+
         item.body.getAsync(Office.CoercionType.Text, r1 => {
           const bodyText = r1.status === Office.AsyncResultStatus.Succeeded ? r1.value || '' : '';
           item.body.getAsync(Office.CoercionType.Html, r2 => {
             const bodyHtml = r2.status === Office.AsyncResultStatus.Succeeded ? r2.value || '' : '';
             emailData = { subject, sender_name: senderName, sender_email: senderEmail,
               received_at: receivedAt, body_text: bodyText, body_html: bodyHtml,
-              internet_message_id: messageId, recipients };
+              internet_message_id: messageId, recipients, attachments };
             renderEmailPreview();
             resolve();
           });
@@ -474,8 +557,10 @@
       const date = new Date(emailData.received_at).toLocaleString('pt-PT', {
         day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
       });
+      const attachCount = (emailData.attachments || []).length;
+      const attachInfo  = attachCount > 0 ? ` · 📎 ${attachCount} ficheiro${attachCount > 1 ? 's' : ''}` : '';
       document.getElementById('previewMeta').textContent =
-        `De: ${emailData.sender_name} <${emailData.sender_email}> · ${date}`;
+        `De: ${emailData.sender_name} <${emailData.sender_email}> · ${date}${attachInfo}`;
     }
 
     // ── Deal search — directo via Supabase client ────────────────────────────
@@ -601,27 +686,323 @@
 
         if (insertError) throw new Error('Erro ao registar: ' + insertError.message);
 
-        // 4. Inserir também na tabela deal_email_attachments (para o card de emails)
+        // 4. Fazer upload dos ficheiros anexados ao email (se existirem)
+        const emailAttachments = emailData.attachments || [];
+        const fileAttachmentIds = [];
+
+        if (emailAttachments.length > 0) {
+          dbg('Ficheiros encontrados: ' + emailAttachments.length);
+
+          // Obter conteúdo do anexo via getAttachmentContentAsync (Office.js 1.8+)
+          function getAttachmentContent(attachmentId) {
+            return new Promise((res, rej) => {
+              Office.context.mailbox.item.getAttachmentContentAsync(
+                attachmentId,
+                { asyncContext: attachmentId },
+                result => {
+                  if (result.status === Office.AsyncResultStatus.Failed) {
+                    return rej(new Error('getAttachmentContentAsync falhou: ' + (result.error?.message || '?')));
+                  }
+                  const content = result.value;
+                  if (content.format === Office.MailboxEnums.AttachmentContentFormat.Base64) {
+                    res(content.content);
+                  } else {
+                    rej(new Error('Formato não suportado: ' + content.format));
+                  }
+                }
+              );
+            });
+          }
+
+          for (let i = 0; i < emailAttachments.length; i++) {
+            const att = emailAttachments[i];
+            setLoading('btnAttach', true, `A anexar ficheiros (${i + 1}/${emailAttachments.length})...`);
+            try {
+              dbg('A obter conteúdo de: ' + att.name);
+              const b64 = await getAttachmentContent(att.id);
+              console.log('Conteúdo obtido: ' + b64.length + ' chars');
+
+              // Converter base64 → Blob
+              const byteChars = atob(b64);
+              const byteArr = new Uint8Array(byteChars.length);
+              for (let b = 0; b < byteChars.length; b++) byteArr[b] = byteChars.charCodeAt(b);
+              const attBlob = new Blob([byteArr], { type: att.contentType || 'application/octet-stream' });
+
+              const safeAttName = att.name.replace(/[^a-zA-Z0-9.\-_]/g, '_').slice(0, 100);
+              const attPath = `${dealId}/email_att_${Date.now()}_${safeAttName}`;
+
+              const { error: attUploadErr } = await supabaseClient.storage
+                .from('deal-attachments')
+                .upload(attPath, attBlob, { contentType: att.contentType || 'application/octet-stream' });
+              if (attUploadErr) throw new Error(attUploadErr.message);
+
+              const { data: attRecord, error: attInsertErr } = await supabaseClient
+                .from('deal_attachments')
+                .insert({
+                  deal_id:     dealId,
+                  file_name:   att.name,
+                  file_url:    attPath,
+                  file_type:   att.contentType || null,
+                  file_size:   att.size || attBlob.size,
+                  uploaded_by: user?.id || null,
+                })
+                .select().single();
+              if (attInsertErr) throw new Error(attInsertErr.message);
+              fileAttachmentIds.push(attRecord.id);
+
+            } catch (attErr) {
+              dbg('FALHOU "' + att.name + '": ' + attErr.message);
+              console.warn(`Não foi possível anexar ficheiro "${att.name}":`, attErr.message);
+            }
+          }
+        }
+
+        // 5. Inserir na tabela deal_email_attachments (com IDs dos ficheiros do email)
         const { error: emailInsertError } = await supabaseClient
           .from('deal_email_attachments')
           .insert({
-            deal_id:              dealId,
-            subject:              emailData.subject,
-            sender_email:         emailData.sender_email,
-            attached_by:          user?.id || null,
-            attachment_id:        attachmentRecord.id,
-            internet_message_id:  emailData.internet_message_id || null,
+            deal_id:                    dealId,
+            subject:                    emailData.subject,
+            sender_email:               emailData.sender_email,
+            attached_by:                user?.id || null,
+            attachment_id:              attachmentRecord.id,
+            internet_message_id:        emailData.internet_message_id || null,
+            email_file_attachment_ids:  fileAttachmentIds,
           });
 
         if (emailInsertError) throw new Error('Erro ao registar email: ' + emailInsertError.message);
 
-        showAlert('attachSuccess', `✓ Email anexado com sucesso a "${selectedDeal.title}"`);
+        const nFiles = fileAttachmentIds.length;
+        const filesMsg = nFiles > 0 ? ` + ${nFiles} ficheiro${nFiles > 1 ? 's' : ''}` : '';
+        showAlert('attachSuccess', `✓ Email${filesMsg} anexado${nFiles > 1 ? 's' : ''} com sucesso a "${selectedDeal.title}"`);
         setLoading('btnAttach', false, 'Anexar Email');
         setTimeout(() => { clearSelectedDeal(); hideAlert('attachSuccess'); }, 4000);
 
       } catch (err) {
         showAlert('attachError', `Erro: ${err.message}`);
         setLoading('btnAttach', false, 'Anexar Email');
+      }
+    }
+
+    // ── Create Deal ──────────────────────────────────────────────────────────
+    let createClientId   = null;
+    let createContactId  = null;
+    let createClientTimeout = null;
+    let createContactTimeout = null;
+
+    function goToCreate() {
+      // Pre-fill title with email subject
+      if (emailData) {
+        document.getElementById('createTitle').value = emailData.subject || '';
+        document.getElementById('createPreviewSubject').textContent = emailData.subject || '';
+        const date = new Date(emailData.received_at).toLocaleString('pt-PT', {
+          day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
+        document.getElementById('createPreviewMeta').textContent =
+          `De: ${emailData.sender_name} <${emailData.sender_email}> · ${date}`;
+      }
+      clearCreateClient();
+      clearCreateContact();
+      document.getElementById('createValue').value = '';
+      hideAlert('createError');
+      hideAlert('createSuccess');
+      updateCreateBtn();
+      showSection('sectionCreate');
+    }
+
+    function updateCreateBtn() {
+      const title = document.getElementById('createTitle').value.trim();
+      document.getElementById('btnCreate').disabled = !title || !createClientId;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('createTitle')?.addEventListener('input', updateCreateBtn);
+    });
+
+    // ── Client search for create ──
+    function onCreateClientInput() {
+      clearTimeout(createClientTimeout);
+      createClientTimeout = setTimeout(searchCreateClients, 300);
+    }
+    function onCreateClientFocus() {
+      if (document.getElementById('createClientSearch').value) searchCreateClients();
+    }
+
+    async function searchCreateClients() {
+      const query = document.getElementById('createClientSearch').value.trim();
+      const resultsEl = document.getElementById('createClientResults');
+      resultsEl.innerHTML = '<div class="no-results">A pesquisar...</div>';
+      resultsEl.classList.add('show');
+      try {
+        let q = supabaseClient.from('clients').select('id, name').order('name').limit(30);
+        if (query) q = q.ilike('name', `%${query}%`);
+        const { data, error } = await q;
+        if (error) throw error;
+        if (!data?.length) {
+          resultsEl.innerHTML = '<div class="no-results">Nenhum cliente encontrado</div>';
+          return;
+        }
+        resultsEl.innerHTML = data.map(c =>
+          `<div class="search-result-item" onclick='selectCreateClient(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
+            <div class="deal-title">${esc(c.name)}</div>
+          </div>`
+        ).join('');
+      } catch(err) {
+        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
+      }
+    }
+
+    function selectCreateClient(client) {
+      createClientId = client.id;
+      document.getElementById('createClientName').textContent = client.name;
+      document.getElementById('createClientBox').classList.add('show');
+      document.getElementById('createClientWrapper').style.display = 'none';
+      document.getElementById('createClientResults').classList.remove('show');
+      // Show contact field and load contacts
+      document.getElementById('createContactField').style.display = 'block';
+      loadCreateContacts(client.id, client.name);
+      updateCreateBtn();
+    }
+
+    function clearCreateClient() {
+      createClientId = null;
+      document.getElementById('createClientBox').classList.remove('show');
+      document.getElementById('createClientWrapper').style.display = 'block';
+      document.getElementById('createClientSearch').value = '';
+      document.getElementById('createContactField').style.display = 'none';
+      clearCreateContact();
+      updateCreateBtn();
+    }
+
+    // ── Contact search for create ──
+    function onCreateContactInput() {
+      clearTimeout(createContactTimeout);
+      createContactTimeout = setTimeout(() => filterCreateContacts(document.getElementById('createContactSearch').value), 200);
+    }
+
+    let allCreateContacts = [];
+
+    async function loadCreateContacts(clientId, clientName) {
+      clearCreateContact();
+      document.getElementById('createContactSearch').value = '';
+      const resultsEl = document.getElementById('createContactResults');
+      resultsEl.innerHTML = '<div class="no-results">A carregar...</div>';
+      resultsEl.classList.add('show');
+      try {
+        const { data, error } = await supabaseClient
+          .from('contacts')
+          .select('id, first_name, last_name, email, job_title')
+          .eq('client_id', clientId)
+          .order('is_primary', { ascending: false })
+          .order('first_name');
+        if (error) throw error;
+        allCreateContacts = data || [];
+        renderCreateContacts(allCreateContacts);
+        // Auto-select if only one contact
+        if (allCreateContacts.length === 1) selectCreateContact(allCreateContacts[0]);
+      } catch(err) {
+        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
+      }
+    }
+
+    function filterCreateContacts(query) {
+      const q = query.toLowerCase();
+      const filtered = q
+        ? allCreateContacts.filter(c =>
+            `${c.first_name} ${c.last_name || ''} ${c.email || ''}`.toLowerCase().includes(q))
+        : allCreateContacts;
+      renderCreateContacts(filtered);
+    }
+
+    function renderCreateContacts(contacts) {
+      const resultsEl = document.getElementById('createContactResults');
+      if (!contacts.length) {
+        resultsEl.innerHTML = '<div class="no-results">Nenhum contacto encontrado</div>';
+        resultsEl.classList.add('show');
+        return;
+      }
+      resultsEl.innerHTML = contacts.map(c => {
+        const name = `${c.first_name} ${c.last_name || ''}`.trim();
+        const sub = [c.job_title, c.email].filter(Boolean).join(' · ');
+        return `<div class="search-result-item" onclick='selectCreateContact(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
+          <div class="deal-title">${esc(name)}</div>
+          ${sub ? `<div class="deal-meta">${esc(sub)}</div>` : ''}
+        </div>`;
+      }).join('');
+      resultsEl.classList.add('show');
+    }
+
+    function selectCreateContact(contact) {
+      createContactId = contact.id;
+      const name = `${contact.first_name} ${contact.last_name || ''}`.trim();
+      document.getElementById('createContactName').textContent = name + (contact.job_title ? ` · ${contact.job_title}` : '');
+      document.getElementById('createContactBox').classList.add('show');
+      document.getElementById('createContactWrapper').style.display = 'none';
+      document.getElementById('createContactResults').classList.remove('show');
+    }
+
+    function clearCreateContact() {
+      createContactId = null;
+      document.getElementById('createContactBox').classList.remove('show');
+      document.getElementById('createContactWrapper').style.display = 'block';
+      document.getElementById('createContactSearch').value = '';
+      document.getElementById('createContactResults').classList.remove('show');
+      allCreateContacts = [];
+    }
+
+    // ── Create deal submit ──
+    async function handleCreate() {
+      hideAlert('createError');
+      hideAlert('createSuccess');
+      const title = document.getElementById('createTitle').value.trim();
+      if (!title || !createClientId) return;
+      setLoading('btnCreate', true, 'A criar...');
+
+      try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+
+        // Reserve opp number
+        const { data: oppNumber, error: oppErr } = await supabaseClient.rpc('reserve_next_opp_number');
+        if (oppErr) throw new Error('Erro ao gerar número: ' + oppErr.message);
+
+        const fullTitle = `${oppNumber} - ${title}`;
+        const value = parseFloat(document.getElementById('createValue').value.replace(',', '.')) || 0;
+
+        const { data: deal, error: dealErr } = await supabaseClient
+          .from('deals')
+          .insert({
+            title:      fullTitle,
+            client_id:  createClientId,
+            contact_id: createContactId || null,
+            stage:      'qualification',
+            value:      value,
+            probability: 10,
+            created_by: user?.id || null,
+            owner_id:   user?.id || null,
+          })
+          .select()
+          .single();
+
+        if (dealErr) {
+          // Release the opp number if deal creation failed
+          await supabaseClient.rpc('release_opp_number', { p_number: oppNumber }).catch(() => {});
+          throw new Error('Erro ao criar oportunidade: ' + dealErr.message);
+        }
+
+        showAlert('createSuccess', `✓ Oportunidade "${fullTitle}" criada com sucesso!`);
+        setLoading('btnCreate', false, 'Criar Oportunidade');
+
+        // Offer to attach the email
+        setTimeout(() => {
+          hideAlert('createSuccess');
+          selectedDeal = { id: deal.id, title: fullTitle };
+          selectDeal(selectedDeal);
+          showSection('sectionAttach');
+        }, 2000);
+
+      } catch(err) {
+        showAlert('createError', `Erro: ${err.message}`);
+        setLoading('btnCreate', false, 'Criar Oportunidade');
       }
     }
 
@@ -638,4 +1019,3 @@
   </script>
 </body>
 </html>
-
