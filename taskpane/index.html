@@ -71,16 +71,18 @@
       display: block; font-size: 11px; font-weight: 600; color: var(--text-muted);
       text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px;
     }
-    input[type="text"] {
+    input[type="text"], input[type="date"] {
       width: 100%; padding: 9px 12px;
       border: 1px solid var(--border); border-radius: var(--radius);
       font-size: 14px; font-family: inherit; color: var(--text);
       background: var(--bg-card); outline: none; transition: border-color .15s, box-shadow .15s;
+      color-scheme: light;
     }
     input:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(0,197,219,.12);
     }
+    #createCloseDate { cursor: pointer; }
 
     /* ── Button ── */
     .btn {
@@ -165,6 +167,41 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     .no-results { padding: 12px; text-align: center; color: var(--text-muted); font-size: 13px; }
+
+    /* ── Custom date picker ── */
+    .datepicker {
+      display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: 0 6px 20px rgba(26,31,54,.12); padding: 10px; z-index: 20;
+    }
+    .datepicker.show { display: block; }
+    .datepicker-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+    }
+    .datepicker-month {
+      font-size: 13px; font-weight: 600; color: var(--text); text-transform: capitalize;
+    }
+    .datepicker-nav {
+      width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+      border-radius: 6px; cursor: pointer; color: var(--text-muted); font-size: 16px; user-select: none;
+    }
+    .datepicker-nav:hover { background: var(--bg); color: var(--text); }
+    .datepicker-weekdays, .datepicker-days {
+      display: grid; grid-template-columns: repeat(7, 1fr);
+    }
+    .datepicker-weekdays span {
+      text-align: center; font-size: 10px; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; padding: 4px 0;
+    }
+    .datepicker-day {
+      text-align: center; font-size: 13px; padding: 6px 0; border-radius: 6px; cursor: pointer;
+      color: var(--text);
+    }
+    .datepicker-day:hover { background: var(--bg); }
+    .datepicker-day.muted { color: var(--text-muted); opacity: .4; }
+    .datepicker-day.today { font-weight: 700; color: var(--accent); }
+    .datepicker-day.selected { background: var(--primary); color: #fff; }
+    .datepicker-footer { text-align: center; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
 
     footer {
       margin-top: 24px; text-align: center; font-size: 11px;
@@ -295,6 +332,27 @@
     <div class="field">
       <label>Valor Estimado (€)</label>
       <input type="text" id="createValue" placeholder="0" inputmode="decimal" />
+    </div>
+
+    <div class="field">
+      <label>Data prevista de fecho *</label>
+      <div class="search-wrapper" id="closeDateWrapper">
+        <input type="text" id="createCloseDate" placeholder="Selecionar data..." readonly autocomplete="off" onclick="toggleCloseDatePicker()" />
+        <div class="datepicker" id="closeDatePicker">
+          <div class="datepicker-header">
+            <span class="datepicker-nav" onclick="event.stopPropagation(); shiftCloseDateMonth(-1)">&#8249;</span>
+            <span class="datepicker-month" id="closeDatePickerMonth"></span>
+            <span class="datepicker-nav" onclick="event.stopPropagation(); shiftCloseDateMonth(1)">&#8250;</span>
+          </div>
+          <div class="datepicker-weekdays">
+            <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
+          </div>
+          <div class="datepicker-days" id="closeDatePickerDays"></div>
+          <div class="datepicker-footer">
+            <span class="change-link" onclick="event.stopPropagation(); selectCloseDateToday()">Hoje</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <button class="btn btn-primary" id="btnCreate" onclick="handleCreate()" disabled>
@@ -789,6 +847,8 @@
     let createContactId  = null;
     let createClientTimeout = null;
     let createContactTimeout = null;
+    let createCloseDateISO   = null;   // 'YYYY-MM-DD' selected value
+    let closeDatePickerViewDate = new Date();
 
     function goToCreate() {
       // Pre-fill title with email subject
@@ -804,6 +864,10 @@
       clearCreateClient();
       clearCreateContact();
       document.getElementById('createValue').value = '';
+      createCloseDateISO = null;
+      document.getElementById('createCloseDate').value = '';
+      document.getElementById('closeDatePicker').classList.remove('show');
+      closeDatePickerViewDate = new Date();
       hideAlert('createError');
       hideAlert('createSuccess');
       updateCreateBtn();
@@ -812,12 +876,92 @@
 
     function updateCreateBtn() {
       const title = document.getElementById('createTitle').value.trim();
-      document.getElementById('btnCreate').disabled = !title || !createClientId;
+      document.getElementById('btnCreate').disabled = !title || !createClientId || !createCloseDateISO;
     }
 
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('createTitle')?.addEventListener('input', updateCreateBtn);
     });
+
+    // ── Custom date picker ──────────────────────────────────────────────────
+    const CLOSE_DATE_MONTHS = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+
+    function toggleCloseDatePicker() {
+      const picker = document.getElementById('closeDatePicker');
+      const isShowing = picker.classList.contains('show');
+      closeAllDropdowns();
+      if (!isShowing) {
+        closeDatePickerViewDate = createCloseDateISO ? new Date(`${createCloseDateISO}T00:00:00`) : new Date();
+        renderCloseDatePicker();
+        picker.classList.add('show');
+      }
+    }
+
+    function closeAllDropdowns() {
+      document.getElementById('closeDatePicker')?.classList.remove('show');
+      document.querySelectorAll('.search-results.show').forEach(el => el.classList.remove('show'));
+    }
+
+    document.addEventListener('click', (e) => {
+      const wrapper = document.getElementById('closeDateWrapper');
+      if (wrapper && !wrapper.contains(e.target)) {
+        document.getElementById('closeDatePicker')?.classList.remove('show');
+      }
+    });
+
+    function shiftCloseDateMonth(delta) {
+      closeDatePickerViewDate = new Date(closeDatePickerViewDate.getFullYear(), closeDatePickerViewDate.getMonth() + delta, 1);
+      renderCloseDatePicker();
+    }
+
+    function renderCloseDatePicker() {
+      const year  = closeDatePickerViewDate.getFullYear();
+      const month = closeDatePickerViewDate.getMonth();
+      document.getElementById('closeDatePickerMonth').textContent = `${CLOSE_DATE_MONTHS[month]} ${year}`;
+
+      const firstOfMonth  = new Date(year, month, 1);
+      const startWeekday  = firstOfMonth.getDay();
+      const daysInMonth   = new Date(year, month + 1, 0).getDate();
+      const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+      const todayISO = toISODate(new Date());
+      let html = '';
+
+      for (let i = startWeekday - 1; i >= 0; i--) {
+        html += `<span class="datepicker-day muted">${daysInPrevMonth - i}</span>`;
+      }
+      for (let d = 1; d <= daysInMonth; d++) {
+        const iso = toISODate(new Date(year, month, d));
+        const classes = ['datepicker-day'];
+        if (iso === todayISO) classes.push('today');
+        if (iso === createCloseDateISO) classes.push('selected');
+        html += `<span class="${classes.join(' ')}" onclick="event.stopPropagation(); selectCloseDateDay('${iso}')">${d}</span>`;
+      }
+      const totalCells = startWeekday + daysInMonth;
+      const trailing = (7 - (totalCells % 7)) % 7;
+      for (let d = 1; d <= trailing; d++) {
+        html += `<span class="datepicker-day muted">${d}</span>`;
+      }
+
+      document.getElementById('closeDatePickerDays').innerHTML = html;
+    }
+
+    function toISODate(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function selectCloseDateDay(iso) {
+      createCloseDateISO = iso;
+      const d = new Date(`${iso}T00:00:00`);
+      document.getElementById('createCloseDate').value = d.toLocaleDateString('pt-PT');
+      document.getElementById('closeDatePicker').classList.remove('show');
+      updateCreateBtn();
+    }
+
+    function selectCloseDateToday() {
+      selectCloseDateDay(toISODate(new Date()));
+    }
+
 
     // ── Client search for create ──
     function onCreateClientInput() {
@@ -955,7 +1099,12 @@
       hideAlert('createError');
       hideAlert('createSuccess');
       const title = document.getElementById('createTitle').value.trim();
+      const closeDate = createCloseDateISO;
       if (!title || !createClientId) return;
+      if (!closeDate) {
+        showAlert('createError', 'Por favor preencha a Data prevista de fecho.');
+        return;
+      }
       setLoading('btnCreate', true, 'A criar...');
 
       try {
@@ -977,6 +1126,7 @@
             stage:      'qualification',
             value:      value,
             probability: 10,
+            expected_close_date: closeDate,
             created_by: user?.id || null,
             owner_id:   user?.id || null,
           })
