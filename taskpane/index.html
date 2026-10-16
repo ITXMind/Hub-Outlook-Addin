@@ -459,7 +459,7 @@
     function setLoading(btnId, loading, label) {
       const btn = document.getElementById(btnId);
       btn.disabled = loading;
-      btn.innerHTML = loading ? `<span class="spinner"></span>${label || 'A processar...'}` : label;
+      btn.innerHTML = loading ? `<span class="spinner"></span>${esc(label || 'A processar...')}` : esc(label);
     }
 
     // ── Auth ─────────────────────────────────────────────────────────────────
@@ -643,7 +643,7 @@
         ).join('');
         bindResultItems(resultsEl, deals, selectDeal);
       } catch (err) {
-        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
+        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${esc(err?.message || 'Erro desconhecido')}</div>`;
       }
     }
 
@@ -979,7 +979,7 @@
         ).join('');
         bindResultItems(resultsEl, data, selectCreateClient);
       } catch(err) {
-        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
+        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${esc(err?.message || 'Erro desconhecido')}</div>`;
       }
     }
 
@@ -1032,7 +1032,7 @@
         // Auto-select if only one contact
         if (allCreateContacts.length === 1) selectCreateContact(allCreateContacts[0]);
       } catch(err) {
-        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
+        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${esc(err?.message || 'Erro desconhecido')}</div>`;
       }
     }
 
