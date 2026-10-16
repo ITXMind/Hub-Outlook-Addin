@@ -635,12 +635,13 @@
           resultsEl.innerHTML = '<div class="no-results">Nenhuma oportunidade encontrada</div>';
           return;
         }
-        resultsEl.innerHTML = deals.map(d =>
-          `<div class="search-result-item" onclick='selectDeal(${JSON.stringify(d).replace(/'/g, "&#39;")})'>
+        resultsEl.innerHTML = deals.map((d, i) =>
+          `<div class="search-result-item" data-index="${i}">
             <div class="deal-title">${esc(d.title)}</div>
-            <div class="deal-meta">${d.client?.name ? esc(d.client.name) + ' · ' : ''}<span class="stage-badge">${stageLabel(d.stage)}</span></div>
+            <div class="deal-meta">${d.client?.name ? esc(d.client.name) + ' · ' : ''}<span class="stage-badge">${esc(stageLabel(d.stage))}</span></div>
           </div>`
         ).join('');
+        bindResultItems(resultsEl, deals, selectDeal);
       } catch (err) {
         resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
       }
@@ -971,11 +972,12 @@
           resultsEl.innerHTML = '<div class="no-results">Nenhum cliente encontrado</div>';
           return;
         }
-        resultsEl.innerHTML = data.map(c =>
-          `<div class="search-result-item" onclick='selectCreateClient(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
+        resultsEl.innerHTML = data.map((c, i) =>
+          `<div class="search-result-item" data-index="${i}">
             <div class="deal-title">${esc(c.name)}</div>
           </div>`
         ).join('');
+        bindResultItems(resultsEl, data, selectCreateClient);
       } catch(err) {
         resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
       }
@@ -1050,14 +1052,15 @@
         resultsEl.classList.add('show');
         return;
       }
-      resultsEl.innerHTML = contacts.map(c => {
+      resultsEl.innerHTML = contacts.map((c, i) => {
         const name = `${c.first_name} ${c.last_name || ''}`.trim();
         const sub = [c.job_title, c.email].filter(Boolean).join(' · ');
-        return `<div class="search-result-item" onclick='selectCreateContact(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
+        return `<div class="search-result-item" data-index="${i}">
           <div class="deal-title">${esc(name)}</div>
           ${sub ? `<div class="deal-meta">${esc(sub)}</div>` : ''}
         </div>`;
       }).join('');
+      bindResultItems(resultsEl, contacts, selectCreateContact);
       resultsEl.classList.add('show');
     }
 
@@ -1159,7 +1162,17 @@
       }
       return esc(bodyText || '').replace(/\r?\n/g, '<br>');
     }
+    // Liga cliques nos resultados a objetos guardados em JS (sem onclick inline com JSON)
+    function bindResultItems(container, items, onSelect) {
+      container.querySelectorAll('.search-result-item[data-index]').forEach(el => {
+        el.addEventListener('click', () => {
+          const item = items[Number(el.dataset.index)];
+          if (item) onSelect(item);
+        });
+      });
+    }
     const STAGE_LABELS = {
+
       qualification: 'Qualificação', presale: 'Pré-venda', proposal: 'Proposta',
       negotiation: 'Negociação', best_case: 'Best Case', committed: 'Committed',
       closed_won: 'Ganho', closed_lost: 'Perdido',
