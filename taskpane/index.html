@@ -371,6 +371,8 @@
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ndWRkYW9wc3Boa3ZqbnFya21nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc5NDczMzEsImV4cCI6MjA4MzUyMzMzMX0.sQ1MKsUQ-y0_G0seSxBCIkldquvHbU0HTKXbDwjaGCk';
     const EDGE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/attach-email-to-deal`;
     const HUB_LOGIN_URL     = 'https://itxmind.github.io/Hub-Outlook-Addin/taskpane/auth-dialog.html';
+    const ADDIN_ORIGIN      = 'https://itxmind.github.io';
+
 
     let supabaseClient = null;
     let currentUser    = null;
@@ -477,14 +479,24 @@
 
           dialog.addEventHandler(Office.EventType.DialogMessageReceived, async arg => {
             dialog.close();
+            // Versões recentes do Office indicam a origem da mensagem: só aceitar o nosso diálogo
+            if (arg.origin && arg.origin !== ADDIN_ORIGIN) {
+              showAlert('loginError', 'Resposta de origem desconhecida. Tenta novamente.');
+              setLoading('btnLogin', false, 'Iniciar Sessão');
+              return;
+            }
             let msg;
             try { msg = JSON.parse(arg.message); } catch (e) {
               showAlert('loginError', 'Erro ao processar resposta. Tenta novamente.');
               setLoading('btnLogin', false, 'Iniciar Sessão');
               return;
             }
+            const validShape = msg && typeof msg === 'object' &&
+              msg.type === 'AUTH_SUCCESS' &&
+              typeof msg.access_token === 'string' && msg.access_token.length > 0 &&
+              typeof msg.refresh_token === 'string';
 
-            if (msg.type === 'AUTH_SUCCESS' && msg.access_token) {
+            if (validShape) {
               const { data, error } = await supabaseClient.auth.setSession({
                 access_token: msg.access_token,
                 refresh_token: msg.refresh_token,
