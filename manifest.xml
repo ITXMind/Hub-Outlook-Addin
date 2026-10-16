@@ -16,7 +16,7 @@
   <!-- Ícones públicos do Office CDN (sempre acessíveis, não requerem setup) -->
   <IconUrl DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/assets/icon-16.png"/>
   <HighResolutionIconUrl DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/assets/icon-80.png"/>
-  <SupportUrl DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/support.html"/>
+  <SupportUrl DefaultValue="https://hub.itxmind.com"/>
 
   <AppDomains>
     <!-- Sem barra no final -->
