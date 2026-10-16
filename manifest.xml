@@ -44,7 +44,9 @@
     </Form>
   </FormSettings>
 
-  <Permissions>ReadWriteMailbox</Permissions>
+  <!-- ReadItem chega: o add-in só lê o item aberto (body.getAsync, attachments,
+       getAttachmentContentAsync). Nota: getAttachmentContentAsync exige Mailbox 1.8. -->
+  <Permissions>ReadItem</Permissions>
 
   <Rule xsi:type="RuleCollection" Mode="Or">
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
