@@ -10,6 +10,8 @@
 
   <!-- Supabase JS -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js" integrity="sha384-P0JNneQf81HOl9VwNXK76cQ9VMD6Nfsnepxb0cCOg8+UzEdzgPHAPV4wVQrvYQSx" crossorigin="anonymous"></script>
+
 
   <!-- Hub fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -677,7 +679,9 @@
         // 1. Gerar ficheiro HTML com o conteúdo do email
         const date = new Date(emailData.received_at).toLocaleString('pt-PT');
         const htmlContent = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>${emailData.subject}</title>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'">
+<title>${esc(emailData.subject)}</title>
 <style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#333}
 .header{background:#f5f5f5;padding:20px;border-radius:8px;margin-bottom:20px}
 .label{font-weight:bold;color:#666;font-size:12px;text-transform:uppercase}
@@ -687,14 +691,14 @@
 </head><body>
 <div class="header">
   <div class="label">Assunto</div>
-  <div class="value" style="font-size:18px;font-weight:bold;">${emailData.subject}</div>
+  <div class="value" style="font-size:18px;font-weight:bold;">${esc(emailData.subject)}</div>
   <div class="label">De</div>
-  <div class="value">${emailData.sender_name} &lt;${emailData.sender_email}&gt;</div>
+  <div class="value">${esc(emailData.sender_name)} &lt;${esc(emailData.sender_email)}&gt;</div>
   <div class="label">Data</div>
-  <div class="value">${date}</div>
+  <div class="value">${esc(date)}</div>
 </div>
-<div class="body">${emailData.body_html || emailData.body_text.replace(/\n/g,'<br>')}</div>
-<div class="footer">Anexado via Outlook Add-in por ${user?.email || ''}</div>
+<div class="body">${sanitizeEmailBody(emailData.body_html, emailData.body_text)}</div>
+<div class="footer">Anexado via Outlook Add-in por ${esc(user?.email || '')}</div>
 </body></html>`;
 
         // 2. Upload para o bucket deal-attachments
@@ -1139,7 +1143,21 @@
 
     // ── Utils ────────────────────────────────────────────────────────────────
     function esc(s) {
-      return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      return String(s ?? '')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+    // Sanitizar o HTML do email com DOMPurify; sem DOMPurify, usar texto escapado
+    function sanitizeEmailBody(bodyHtml, bodyText) {
+      if (bodyHtml && window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+        return window.DOMPurify.sanitize(bodyHtml, {
+          WHOLE_DOCUMENT: false,
+          FORBID_TAGS: ['script','style','iframe','object','embed','form','base','meta','link','frame','frameset','svg','math'],
+          // Atributos de eventos (on*) já são removidos por omissão pelo DOMPurify
+        });
+      }
+      return esc(bodyText || '').replace(/\r?\n/g, '<br>');
     }
     const STAGE_LABELS = {
       qualification: 'Qualificação', presale: 'Pré-venda', proposal: 'Proposta',
