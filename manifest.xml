@@ -7,7 +7,7 @@
   xsi:type="MailApp">
 
   <Id>22a35806-a5ac-465c-9044-0ac0953318dd</Id>
-  <Version>1.0.0</Version>
+  <Version>1.0.1</Version>
   <ProviderName>ITXMind</ProviderName>
   <DefaultLocale>pt-PT</DefaultLocale>
   <DisplayName DefaultValue="Hub - Anexar Email"/>
@@ -38,7 +38,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/index.html?v=2"/>
+        <SourceLocation DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/index.html?v=3"/>
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -103,8 +103,8 @@
       </bt:Images>
 
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/commands.html?v=2"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/index.html?v=2"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/commands.html?v=3"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://itxmind.github.io/Hub-Outlook-Addin/taskpane/index.html?v=3"/>
       </bt:Urls>
 
       <bt:ShortStrings>
