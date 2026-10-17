@@ -9,7 +9,10 @@
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
 
   <!-- Supabase JS -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.min.js" integrity="sha384-P0JNneQf81HOl9VwNXK76cQ9VMD6Nfsnepxb0cCOg8+UzEdzgPHAPV4wVQrvYQSx" crossorigin="anonymous"></script>
+
 
   <!-- Hub fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -371,6 +374,8 @@
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ndWRkYW9wc3Boa3ZqbnFya21nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc5NDczMzEsImV4cCI6MjA4MzUyMzMzMX0.sQ1MKsUQ-y0_G0seSxBCIkldquvHbU0HTKXbDwjaGCk';
     const EDGE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/attach-email-to-deal`;
     const HUB_LOGIN_URL     = 'https://itxmind.github.io/Hub-Outlook-Addin/taskpane/auth-dialog.html';
+    const ADDIN_ORIGIN      = 'https://itxmind.github.io';
+
 
     let supabaseClient = null;
     let currentUser    = null;
@@ -379,37 +384,15 @@
     let emailData      = null;
     let searchTimeout  = null;
 
-    // Chaves fixas para guardar tokens — persistem entre sessões via RoamingSettings
+    // Segurança: os tokens NÃO são persistidos. Antes eram guardados em
+    // localStorage (origem itxmind.github.io, partilhada por todos os sites
+    // GitHub Pages da organização) e nas RoamingSettings do Outlook.
+    // Agora a sessão vive só em memória: o utilizador tem de voltar a iniciar
+    // sessão sempre que o painel é reaberto. É uma troca deliberada de
+    // conveniência por segurança. O refresh automático continua ativo em memória.
+    // As chaves antigas mantêm-se só para apagar valores legados.
     const TOKEN_KEY   = 'hub_addin_access_token';
     const REFRESH_KEY = 'hub_addin_refresh_token';
-
-    function saveTokens(accessToken, refreshToken) {
-      try {
-        // Tentar RoamingSettings (persiste no servidor Microsoft — mais fiável)
-        if (Office.context.roamingSettings) {
-          Office.context.roamingSettings.set(TOKEN_KEY, accessToken);
-          Office.context.roamingSettings.set(REFRESH_KEY, refreshToken);
-          Office.context.roamingSettings.saveAsync();
-        }
-      } catch(e) {}
-      try { localStorage.setItem(TOKEN_KEY, accessToken); } catch(e) {}
-      try { localStorage.setItem(REFRESH_KEY, refreshToken); } catch(e) {}
-    }
-
-    function loadTokens() {
-      let access = null, refresh = null;
-      try {
-        if (Office.context.roamingSettings) {
-          access  = Office.context.roamingSettings.get(TOKEN_KEY);
-          refresh = Office.context.roamingSettings.get(REFRESH_KEY);
-        }
-      } catch(e) {}
-      if (!access) {
-        try { access  = localStorage.getItem(TOKEN_KEY); } catch(e) {}
-        try { refresh = localStorage.getItem(REFRESH_KEY); } catch(e) {}
-      }
-      return { access, refresh };
-    }
 
     function clearTokens() {
       try {
@@ -421,43 +404,34 @@
       } catch(e) {}
       try { localStorage.removeItem(TOKEN_KEY); } catch(e) {}
       try { localStorage.removeItem(REFRESH_KEY); } catch(e) {}
+      // Apagar também sessões supabase-js antigas (chave sb-<ref>-auth-token)
+      try {
+        Object.keys(localStorage)
+          .filter(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+          .forEach(k => localStorage.removeItem(k));
+      } catch(e) {}
     }
 
     // ── Office init ──────────────────────────────────────────────────────────
     Office.onReady(async () => {
+      // Sessão só em memória: persistSession:false e armazenamento em memória,
+      // para o supabase-js nunca escrever tokens no localStorage.
+      const memoryStore = {};
       supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
           storage: {
-            getItem:    k => { try { return localStorage.getItem(k); } catch(e) { return null; } },
-            setItem:    (k, v) => { try { localStorage.setItem(k, v); } catch(e) {} },
-            removeItem: k => { try { localStorage.removeItem(k); } catch(e) {} },
+            getItem:    k => (k in memoryStore ? memoryStore[k] : null),
+            setItem:    (k, v) => { memoryStore[k] = v; },
+            removeItem: k => { delete memoryStore[k]; },
           },
-          persistSession: true,
+          persistSession: false,
           autoRefreshToken: true,
+          detectSessionInUrl: false,
         }
       });
 
-      // Tentar restaurar sessão a partir dos tokens guardados
-      const { access, refresh } = loadTokens();
-      if (access && refresh) {
-        try {
-          const { data, error } = await supabaseClient.auth.setSession({
-            access_token: access,
-            refresh_token: refresh,
-          });
-          if (!error && data.session) {
-            currentSession = data.session;
-            currentUser    = data.user;
-            // Actualizar tokens guardados (podem ter sido renovados)
-            saveTokens(data.session.access_token, data.session.refresh_token);
-            await initAttachView();
-          } else {
-            clearTokens();
-          }
-        } catch(e) {
-          clearTokens();
-        }
-      }
+      // Apagar tokens guardados por versões anteriores do add-in
+      clearTokens();
 
       document.addEventListener('click', e => {
         if (!e.target.closest('#searchWrapper')) {
@@ -486,7 +460,7 @@
     function setLoading(btnId, loading, label) {
       const btn = document.getElementById(btnId);
       btn.disabled = loading;
-      btn.innerHTML = loading ? `<span class="spinner"></span>${label || 'A processar...'}` : label;
+      btn.innerHTML = loading ? `<span class="spinner"></span>${esc(label || 'A processar...')}` : esc(label);
     }
 
     // ── Auth ─────────────────────────────────────────────────────────────────
@@ -508,14 +482,24 @@
 
           dialog.addEventHandler(Office.EventType.DialogMessageReceived, async arg => {
             dialog.close();
+            // Versões recentes do Office indicam a origem da mensagem: só aceitar o nosso diálogo
+            if (arg.origin && arg.origin !== ADDIN_ORIGIN) {
+              showAlert('loginError', 'Resposta de origem desconhecida. Tenta novamente.');
+              setLoading('btnLogin', false, 'Iniciar Sessão');
+              return;
+            }
             let msg;
             try { msg = JSON.parse(arg.message); } catch (e) {
               showAlert('loginError', 'Erro ao processar resposta. Tenta novamente.');
               setLoading('btnLogin', false, 'Iniciar Sessão');
               return;
             }
+            const validShape = msg && typeof msg === 'object' &&
+              msg.type === 'AUTH_SUCCESS' &&
+              typeof msg.access_token === 'string' && msg.access_token.length > 0 &&
+              typeof msg.refresh_token === 'string';
 
-            if (msg.type === 'AUTH_SUCCESS' && msg.access_token) {
+            if (validShape) {
               const { data, error } = await supabaseClient.auth.setSession({
                 access_token: msg.access_token,
                 refresh_token: msg.refresh_token,
@@ -527,8 +511,8 @@
               }
               currentSession = data.session;
               currentUser    = data.user;
-              saveTokens(data.session.access_token, data.session.refresh_token);
               await initAttachView();
+
             } else {
               showAlert('loginError', 'Login cancelado. Tenta novamente.');
               setLoading('btnLogin', false, 'Iniciar Sessão');
@@ -652,14 +636,15 @@
           resultsEl.innerHTML = '<div class="no-results">Nenhuma oportunidade encontrada</div>';
           return;
         }
-        resultsEl.innerHTML = deals.map(d =>
-          `<div class="search-result-item" onclick='selectDeal(${JSON.stringify(d).replace(/'/g, "&#39;")})'>
+        resultsEl.innerHTML = deals.map((d, i) =>
+          `<div class="search-result-item" data-index="${i}">
             <div class="deal-title">${esc(d.title)}</div>
-            <div class="deal-meta">${d.client?.name ? esc(d.client.name) + ' · ' : ''}<span class="stage-badge">${stageLabel(d.stage)}</span></div>
+            <div class="deal-meta">${d.client?.name ? esc(d.client.name) + ' · ' : ''}<span class="stage-badge">${esc(stageLabel(d.stage))}</span></div>
           </div>`
         ).join('');
+        bindResultItems(resultsEl, deals, selectDeal);
       } catch (err) {
-        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
+        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${esc(err?.message || 'Erro desconhecido')}</div>`;
       }
     }
 
@@ -696,7 +681,9 @@
         // 1. Gerar ficheiro HTML com o conteúdo do email
         const date = new Date(emailData.received_at).toLocaleString('pt-PT');
         const htmlContent = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>${emailData.subject}</title>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'">
+<title>${esc(emailData.subject)}</title>
 <style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#333}
 .header{background:#f5f5f5;padding:20px;border-radius:8px;margin-bottom:20px}
 .label{font-weight:bold;color:#666;font-size:12px;text-transform:uppercase}
@@ -706,14 +693,14 @@
 </head><body>
 <div class="header">
   <div class="label">Assunto</div>
-  <div class="value" style="font-size:18px;font-weight:bold;">${emailData.subject}</div>
+  <div class="value" style="font-size:18px;font-weight:bold;">${esc(emailData.subject)}</div>
   <div class="label">De</div>
-  <div class="value">${emailData.sender_name} &lt;${emailData.sender_email}&gt;</div>
+  <div class="value">${esc(emailData.sender_name)} &lt;${esc(emailData.sender_email)}&gt;</div>
   <div class="label">Data</div>
-  <div class="value">${date}</div>
+  <div class="value">${esc(date)}</div>
 </div>
-<div class="body">${emailData.body_html || emailData.body_text.replace(/\n/g,'<br>')}</div>
-<div class="footer">Anexado via Outlook Add-in por ${user?.email || ''}</div>
+<div class="body">${sanitizeEmailBody(emailData.body_html, emailData.body_text)}</div>
+<div class="footer">Anexado via Outlook Add-in por ${esc(user?.email || '')}</div>
 </body></html>`;
 
         // 2. Upload para o bucket deal-attachments
@@ -986,13 +973,14 @@
           resultsEl.innerHTML = '<div class="no-results">Nenhum cliente encontrado</div>';
           return;
         }
-        resultsEl.innerHTML = data.map(c =>
-          `<div class="search-result-item" onclick='selectCreateClient(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
+        resultsEl.innerHTML = data.map((c, i) =>
+          `<div class="search-result-item" data-index="${i}">
             <div class="deal-title">${esc(c.name)}</div>
           </div>`
         ).join('');
+        bindResultItems(resultsEl, data, selectCreateClient);
       } catch(err) {
-        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
+        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${esc(err?.message || 'Erro desconhecido')}</div>`;
       }
     }
 
@@ -1045,7 +1033,7 @@
         // Auto-select if only one contact
         if (allCreateContacts.length === 1) selectCreateContact(allCreateContacts[0]);
       } catch(err) {
-        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${err.message}</div>`;
+        resultsEl.innerHTML = `<div class="no-results" style="color:var(--danger)">${esc(err?.message || 'Erro desconhecido')}</div>`;
       }
     }
 
@@ -1065,14 +1053,15 @@
         resultsEl.classList.add('show');
         return;
       }
-      resultsEl.innerHTML = contacts.map(c => {
+      resultsEl.innerHTML = contacts.map((c, i) => {
         const name = `${c.first_name} ${c.last_name || ''}`.trim();
         const sub = [c.job_title, c.email].filter(Boolean).join(' · ');
-        return `<div class="search-result-item" onclick='selectCreateContact(${JSON.stringify(c).replace(/'/g, "&#39;")})'>
+        return `<div class="search-result-item" data-index="${i}">
           <div class="deal-title">${esc(name)}</div>
           ${sub ? `<div class="deal-meta">${esc(sub)}</div>` : ''}
         </div>`;
       }).join('');
+      bindResultItems(resultsEl, contacts, selectCreateContact);
       resultsEl.classList.add('show');
     }
 
@@ -1158,9 +1147,33 @@
 
     // ── Utils ────────────────────────────────────────────────────────────────
     function esc(s) {
-      return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      return String(s ?? '')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
+    // Sanitizar o HTML do email com DOMPurify; sem DOMPurify, usar texto escapado
+    function sanitizeEmailBody(bodyHtml, bodyText) {
+      if (bodyHtml && window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+        return window.DOMPurify.sanitize(bodyHtml, {
+          WHOLE_DOCUMENT: false,
+          FORBID_TAGS: ['script','style','iframe','object','embed','form','base','meta','link','frame','frameset','svg','math'],
+          // Atributos de eventos (on*) já são removidos por omissão pelo DOMPurify
+        });
+      }
+      return esc(bodyText || '').replace(/\r?\n/g, '<br>');
+    }
+    // Liga cliques nos resultados a objetos guardados em JS (sem onclick inline com JSON)
+    function bindResultItems(container, items, onSelect) {
+      container.querySelectorAll('.search-result-item[data-index]').forEach(el => {
+        el.addEventListener('click', () => {
+          const item = items[Number(el.dataset.index)];
+          if (item) onSelect(item);
+        });
+      });
     }
     const STAGE_LABELS = {
+
       qualification: 'Qualificação', presale: 'Pré-venda', proposal: 'Proposta',
       negotiation: 'Negociação', best_case: 'Best Case', committed: 'Committed',
       closed_won: 'Ganho', closed_lost: 'Perdido',
